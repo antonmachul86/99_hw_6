@@ -142,7 +142,6 @@ func getColumns(db *sql.DB, tableName string) (map[string]*Column, error) {
 	return columns, nil
 }
 
-// --- БАЗОВЫЙ QueryBuilder ---
 type BaseQueryBuilder struct {
 	builder strings.Builder
 	args    []interface{}
@@ -168,7 +167,6 @@ func (b *BaseQueryBuilder) String() string {
 	return b.builder.String()
 }
 
-// --- SELECT ---
 type SelectQueryBuilder struct {
 	BaseQueryBuilder
 	wasWhere bool
@@ -191,7 +189,6 @@ func (b *SelectQueryBuilder) Offset(val int) *SelectQueryBuilder {
 	return b
 }
 
-// --- INSERT ---
 type InsertQueryBuilder struct {
 	BaseQueryBuilder
 	wasBuilt bool
@@ -224,7 +221,6 @@ func (b *InsertQueryBuilder) String() string {
 	return b.builder.String()
 }
 
-// --- UPDATE ---
 type UpdateQueryBuilder struct {
 	BaseQueryBuilder
 	wasSet   bool
@@ -251,7 +247,6 @@ func (b *UpdateQueryBuilder) Where(op, columnName string, arg interface{}) *Upda
 	return b
 }
 
-// --- DELETE ---
 type DeleteQueryBuilder struct {
 	BaseQueryBuilder
 	wasWhere bool
@@ -375,7 +370,6 @@ func (t *TableHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// --- УТИЛИТАРНЫЕ ФУНКЦИИ ---
 func closeRows(rows *sql.Rows) error {
 	if err := rows.Close(); err != nil {
 		return fmt.Errorf("error closing rows: %w", err)
@@ -653,13 +647,11 @@ func (t *TableHandler) validateColumnValue(column *Column, val interface{}) (int
 	return val, nil
 }
 
-// --- ХЕЛПЕРЫ ДЛЯ LOG+RESPOND ---
 func (t *TableHandler) logAndRespond(w http.ResponseWriter, status int, err error) {
 	log.Println(err)
 	t.respond(w, status, nil, err)
 }
 
-// --- ХЕЛПЕРЫ ДЛЯ Record ---
 func getString(rec Record, key string) (string, bool) {
 	v, ok := rec[key]
 	if !ok {
