@@ -53,7 +53,6 @@ func (c *Column) DefaultValue() interface{} {
 	case VarcharType, TextType:
 		return ""
 	}
-
 	return nil
 }
 
@@ -65,23 +64,23 @@ func getTables(db *sql.DB) ([]*Table, error) {
 
 	rows, err := db.QueryContext(ctx, "SHOW TABLES")
 	if err != nil {
-		return nil, fmt.Errorf("error occurred during get rows due %v", err)
+		return nil, fmt.Errorf("getTables QueryContext error  %v", err)
 	}
 
 	tables := make([]*Table, 0)
 	for rows.Next() {
 		table := new(Table)
 		if err = rows.Scan(&table.Name); err != nil {
-			return nil, fmt.Errorf("error occurred during load columns due %v", err)
+			return nil, fmt.Errorf("getTables QueryContext Scan error %v", err)
 		}
 		tables = append(tables, table)
 	}
 
 	if err = rows.Close(); err != nil {
-		return nil, fmt.Errorf("error occurred during closing rows due %v", err)
+		return nil, fmt.Errorf("getTables QueryContext Close error %v", err)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error occurred table iteration due %v", err)
+		return nil, fmt.Errorf("getTables QueryContext Err error %v", err)
 	}
 
 	return tables, nil
@@ -93,7 +92,7 @@ func getColumns(db *sql.DB, tableName string) (map[string]*Column, error) {
 
 	rows, err := db.QueryContext(ctx, "SHOW COLUMNS FROM "+tableName)
 	if err != nil {
-		return nil, fmt.Errorf("error occurred during get rows due %v", err)
+		return nil, fmt.Errorf("getColumns QueryContext error %v", err)
 	}
 
 	columns := make(map[string]*Column)
@@ -107,7 +106,7 @@ func getColumns(db *sql.DB, tableName string) (map[string]*Column, error) {
 		column := new(Column)
 		vals := []interface{}{&column.Name, &column.Type, &null, &key, new(sql.RawBytes), &extra}
 		if err = rows.Scan(vals...); err != nil {
-			return nil, fmt.Errorf("error occurred during load columns due %v", err)
+			return nil, fmt.Errorf("getColumns Scan error %v", err)
 		}
 
 		if typeParts := strings.SplitN(column.Type, "(", 2); len(typeParts) != 0 {
@@ -116,7 +115,7 @@ func getColumns(db *sql.DB, tableName string) (map[string]*Column, error) {
 		switch column.Type {
 		case IntType, FloatType, VarcharType, TextType:
 		default:
-			return nil, fmt.Errorf("unknown column data type %s", column.Type)
+			return nil, fmt.Errorf("unknown column type %s", column.Type)
 		}
 
 		if null == "YES" {
@@ -133,10 +132,10 @@ func getColumns(db *sql.DB, tableName string) (map[string]*Column, error) {
 	}
 
 	if err = rows.Close(); err != nil {
-		return nil, fmt.Errorf("error occurred during closing rows due %v", err)
+		return nil, fmt.Errorf("getColumns Close error %v", err)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error occurred table iteration due %v", err)
+		return nil, fmt.Errorf("getColumns Err error %v", err)
 	}
 
 	return columns, nil
@@ -267,11 +266,11 @@ type ApiError struct {
 }
 
 var (
-	errTableNotFound    = ApiError{Status: http.StatusNotFound, Err: errors.New("unknown table")}
-	errRecordNotFound   = ApiError{Status: http.StatusNotFound, Err: errors.New("record not found")}
-	errResourceNotFound = ApiError{Status: http.StatusNotFound, Err: errors.New("resource is not found")}
-	errNotAllowed       = ApiError{Status: http.StatusMethodNotAllowed, Err: errors.New("method is not allowed")}
-	errInternal         = ApiError{Status: http.StatusInternalServerError, Err: errors.New("internal server error")}
+	errTableNotFound    = ApiError{Status: http.StatusNotFound, Err: errors.New("errTableNotFound")}
+	errRecordNotFound   = ApiError{Status: http.StatusNotFound, Err: errors.New("errRecordNotFound")}
+	errResourceNotFound = ApiError{Status: http.StatusNotFound, Err: errors.New("errResourceNotFound")}
+	errNotAllowed       = ApiError{Status: http.StatusMethodNotAllowed, Err: errors.New("errNotAllowed")}
+	errInternal         = ApiError{Status: http.StatusInternalServerError, Err: errors.New("errInternal")}
 )
 
 func (ae ApiError) Error() string {
@@ -319,7 +318,7 @@ func (t *TableHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case t.listRegex.MatchString(url):
 		groups := t.listRegex.FindStringSubmatch(url)
 		if len(groups) != 2 {
-			log.Println("submatch group len must be equal 2")
+			log.Println("ServeHTTP groups != 2 err")
 			t.logAndRespond(w, http.StatusInternalServerError, errInternal)
 			return
 		}
@@ -342,7 +341,7 @@ func (t *TableHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case t.detailRegex.MatchString(url):
 		groups := t.detailRegex.FindStringSubmatch(url)
 		if len(groups) != 3 {
-			log.Println("submatch group len must be equal 3")
+			log.Println("ServeHTTP groups != 2 err")
 			t.logAndRespond(w, http.StatusInternalServerError, errInternal)
 			return
 		}
@@ -372,10 +371,10 @@ func (t *TableHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func closeRows(rows *sql.Rows) error {
 	if err := rows.Close(); err != nil {
-		return fmt.Errorf("error closing rows: %w", err)
+		return fmt.Errorf("closeRows Close error %w", err)
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("rows iteration error: %w", err)
+		return fmt.Errorf("closeRows Err error %w", err)
 	}
 	return nil
 }
@@ -518,7 +517,7 @@ func (t *TableHandler) handleRecordUpdate(w http.ResponseWriter, req *http.Reque
 		if column.IsPrimary && val != nil {
 			err := ApiError{
 				Status: http.StatusBadRequest,
-				Err:    fmt.Errorf("field %s have invalid type", column.Name),
+				Err:    fmt.Errorf("invalid type  %s field ", column.Name),
 			}
 			t.logAndRespond(w, http.StatusBadRequest, err)
 			return
@@ -627,7 +626,7 @@ func (t *TableHandler) validateColumnValue(column *Column, val interface{}) (int
 		case int:
 			return v, nil
 		default:
-			return nil, fmt.Errorf("field %s have invalid type", column.Name)
+			return nil, fmt.Errorf("invalid type of %s field ", column.Name)
 		}
 	case FloatType:
 		switch v := val.(type) {
@@ -636,13 +635,13 @@ func (t *TableHandler) validateColumnValue(column *Column, val interface{}) (int
 		case int:
 			return float64(v), nil
 		default:
-			return nil, fmt.Errorf("field %s have invalid type", column.Name)
+			return nil, fmt.Errorf("invalid type of %s field", column.Name)
 		}
 	case VarcharType, TextType:
 		if s, ok := val.(string); ok {
 			return s, nil
 		}
-		return nil, fmt.Errorf("field %s have invalid type", column.Name)
+		return nil, fmt.Errorf("invalid type of %s field", column.Name)
 	}
 	return val, nil
 }
