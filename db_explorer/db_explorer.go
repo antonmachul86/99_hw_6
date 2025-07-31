@@ -15,13 +15,6 @@ import (
 	"time"
 )
 
-const (
-	IntType     = "INT"
-	FloatType   = "FLOAT"
-	TextType    = "TEXT"
-	VarcharType = "VARCHAR"
-)
-
 type Table struct {
 	Name    string
 	Columns map[string]*Column
@@ -44,15 +37,16 @@ type Column struct {
 	IsAutoIncrement bool
 }
 
-func (c *Column) DefaultValue() interface{} {
+func (c *Column) DefaultType() interface{} {
 	switch c.Type {
-	case IntType:
+	case "INT":
 		return 0
-	case FloatType:
+	case "FLOAT":
 		return 0.0
-	case VarcharType, TextType:
+	case "VARCHAR", "TEXT":
 		return ""
 	}
+
 	return nil
 }
 
@@ -113,7 +107,7 @@ func getColumns(db *sql.DB, tableName string) (map[string]*Column, error) {
 			column.Type = strings.ToUpper(typeParts[0])
 		}
 		switch column.Type {
-		case IntType, FloatType, VarcharType, TextType:
+		case "INT", "FLOAT", "VARCHAR", "TEXT":
 		default:
 			return nil, fmt.Errorf("unknown column type %s", column.Type)
 		}
@@ -266,11 +260,11 @@ type ApiError struct {
 }
 
 var (
-	errTableNotFound    = ApiError{Status: http.StatusNotFound, Err: errors.New("errTableNotFound")}
-	errRecordNotFound   = ApiError{Status: http.StatusNotFound, Err: errors.New("errRecordNotFound")}
-	errResourceNotFound = ApiError{Status: http.StatusNotFound, Err: errors.New("errResourceNotFound")}
-	errNotAllowed       = ApiError{Status: http.StatusMethodNotAllowed, Err: errors.New("errNotAllowed")}
-	errInternal         = ApiError{Status: http.StatusInternalServerError, Err: errors.New("errInternal")}
+	errTableNotFound    = ApiError{Status: http.StatusNotFound, Err: errors.New("unknown table")}
+	errRecordNotFound   = ApiError{Status: http.StatusNotFound, Err: errors.New("record not found")}
+	errResourceNotFound = ApiError{Status: http.StatusNotFound, Err: errors.New("resource is not found")}
+	errNotAllowed       = ApiError{Status: http.StatusMethodNotAllowed, Err: errors.New("method is not allowed")}
+	errInternal         = ApiError{Status: http.StatusInternalServerError, Err: errors.New("internal server error")}
 )
 
 func (ae ApiError) Error() string {
@@ -454,7 +448,7 @@ func (t *TableHandler) handleRecordCreate(w http.ResponseWriter, req *http.Reque
 		val := record[column.Name]
 		if val == nil {
 			if !column.IsNullable {
-				builder.Add(column.Name, column.DefaultValue())
+				builder.Add(column.Name, column.DefaultType())
 			}
 			continue
 		}
@@ -517,7 +511,7 @@ func (t *TableHandler) handleRecordUpdate(w http.ResponseWriter, req *http.Reque
 		if column.IsPrimary && val != nil {
 			err := ApiError{
 				Status: http.StatusBadRequest,
-				Err:    fmt.Errorf("invalid type  %s field ", column.Name),
+				Err:    fmt.Errorf("field %s have invalid type", column.Name),
 			}
 			t.logAndRespond(w, http.StatusBadRequest, err)
 			return
@@ -573,20 +567,20 @@ func (t *TableHandler) createRecordsFromRows(rows *sql.Rows) ([]Record, error) {
 			dbType := columnType.DatabaseTypeName()
 			if nullable, _ := columnType.Nullable(); nullable {
 				switch dbType {
-				case IntType:
+				case "INT":
 					vals[i] = new(sql.NullInt64)
-				case FloatType:
+				case "FLOAT":
 					vals[i] = new(sql.NullFloat64)
-				case VarcharType, TextType:
+				case "VARCHAR", "TEXT":
 					vals[i] = new(sql.NullString)
 				}
 			} else {
 				switch dbType {
-				case IntType:
+				case "INT":
 					vals[i] = new(int64)
-				case FloatType:
+				case "FLOAT":
 					vals[i] = new(float64)
-				case VarcharType, TextType:
+				case "VARCHAR", "TEXT":
 					vals[i] = new(string)
 				}
 			}
@@ -619,29 +613,29 @@ func (t *TableHandler) validateColumnValue(column *Column, val interface{}) (int
 		return val, nil
 	}
 	switch column.Type {
-	case IntType:
+	case "INT":
 		switch v := val.(type) {
 		case float64:
 			return int(v), nil
 		case int:
 			return v, nil
 		default:
-			return nil, fmt.Errorf("invalid type of %s field ", column.Name)
+			return nil, fmt.Errorf("field %s have invalid type", column.Name)
 		}
-	case FloatType:
+	case "FLOAT":
 		switch v := val.(type) {
 		case float64:
 			return v, nil
 		case int:
 			return float64(v), nil
 		default:
-			return nil, fmt.Errorf("invalid type of %s field", column.Name)
+			return nil, fmt.Errorf("field %s have invalid type", column.Name)
 		}
-	case VarcharType, TextType:
+	case "VARCHAR", "TEXT":
 		if s, ok := val.(string); ok {
 			return s, nil
 		}
-		return nil, fmt.Errorf("invalid type of %s field", column.Name)
+		return nil, fmt.Errorf("field %s have invalid type", column.Name)
 	}
 	return val, nil
 }
