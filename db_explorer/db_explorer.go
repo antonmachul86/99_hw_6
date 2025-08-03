@@ -20,21 +20,22 @@ type Table struct {
 	Columns map[string]*Column
 }
 
-func (t *Table) Primary() *Column {
-	for _, column := range t.Columns {
-		if column.IsPrimary {
-			return column
-		}
-	}
-	return nil
-}
-
 type Column struct {
 	Name            string
 	Type            string
 	IsNullable      bool
 	IsPrimary       bool
 	IsAutoIncrement bool
+}
+
+func (t *Table) Primary() *Column {
+	for _, column := range t.Columns {
+		if column.IsPrimary {
+			return column
+		}
+	}
+
+	return nil
 }
 
 func (c *Column) DefaultType() interface{} {
@@ -98,7 +99,14 @@ func getColumns(db *sql.DB, tableName string) (map[string]*Column, error) {
 		)
 
 		column := new(Column)
-		vals := []interface{}{&column.Name, &column.Type, &null, &key, new(sql.RawBytes), &extra}
+		vals := []interface{}{
+			&column.Name,
+			&column.Type,
+			&null,
+			&key,
+			new(sql.RawBytes),
+			&extra}
+
 		if err = rows.Scan(vals...); err != nil {
 			return nil, fmt.Errorf("getColumns Scan error %v", err)
 		}
@@ -106,6 +114,7 @@ func getColumns(db *sql.DB, tableName string) (map[string]*Column, error) {
 		if typeParts := strings.SplitN(column.Type, "(", 2); len(typeParts) != 0 {
 			column.Type = strings.ToUpper(typeParts[0])
 		}
+
 		switch column.Type {
 		case "INT", "FLOAT", "VARCHAR", "TEXT":
 		default:
@@ -259,22 +268,38 @@ type ApiError struct {
 	Err    error
 }
 
-var (
-	errTableNotFound    = ApiError{Status: http.StatusNotFound, Err: errors.New("unknown table")}
-	errRecordNotFound   = ApiError{Status: http.StatusNotFound, Err: errors.New("record not found")}
-	errResourceNotFound = ApiError{Status: http.StatusNotFound, Err: errors.New("resource is not found")}
-	errNotAllowed       = ApiError{Status: http.StatusMethodNotAllowed, Err: errors.New("method is not allowed")}
-	errInternal         = ApiError{Status: http.StatusInternalServerError, Err: errors.New("internal server error")}
-)
+type AppConfig struct {
+	Errors struct {
+		TableNotFound    ApiError
+		RecordNotFound   ApiError
+		ResourceNotFound ApiError
+		NotAllowed       ApiError
+		Internal         ApiError
+	}
+	Defaults struct {
+		Limit  int
+		Offset int
+	}
+}
+
+func NewAppConfig() *AppConfig {
+	config := &AppConfig{}
+
+	config.Errors.TableNotFound = ApiError{Status: http.StatusNotFound, Err: errors.New("unknown table")}
+	config.Errors.RecordNotFound = ApiError{Status: http.StatusNotFound, Err: errors.New("record not found")}
+	config.Errors.ResourceNotFound = ApiError{Status: http.StatusNotFound, Err: errors.New("resource is not found")}
+	config.Errors.NotAllowed = ApiError{Status: http.StatusMethodNotAllowed, Err: errors.New("method is not allowed")}
+	config.Errors.Internal = ApiError{Status: http.StatusInternalServerError, Err: errors.New("internal server error")}
+
+	config.Defaults.Limit = 5
+	config.Defaults.Offset = 0
+
+	return config
+}
 
 func (ae ApiError) Error() string {
 	return ae.Err.Error()
 }
-
-const (
-	defaultLimit  = 5
-	defaultOffset = 0
-)
 
 type ResponseBody struct {
 	Error    string      `json:"error,omitempty"`
@@ -301,6 +326,8 @@ type TableHandler struct {
 
 	listRegex   *regexp.Regexp
 	detailRegex *regexp.Regexp
+
+	config *AppConfig
 }
 
 func (t *TableHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -313,14 +340,14 @@ func (t *TableHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		groups := t.listRegex.FindStringSubmatch(url)
 		if len(groups) != 2 {
 			log.Println("ServeHTTP groups != 2 err")
-			t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+			t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 			return
 		}
 
 		tableName := groups[1]
 		table, exist := t.tablesMap[tableName]
 		if !exist {
-			t.logAndRespond(w, http.StatusNotFound, errTableNotFound)
+			t.logAndRespond(w, http.StatusNotFound, t.config.Errors.TableNotFound)
 			return
 		}
 
@@ -330,20 +357,20 @@ func (t *TableHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		case http.MethodPut:
 			t.handleRecordCreate(w, req, table)
 		default:
-			t.logAndRespond(w, http.StatusMethodNotAllowed, errNotAllowed)
+			t.logAndRespond(w, http.StatusMethodNotAllowed, t.config.Errors.NotAllowed)
 		}
 	case t.detailRegex.MatchString(url):
 		groups := t.detailRegex.FindStringSubmatch(url)
 		if len(groups) != 3 {
 			log.Println("ServeHTTP groups != 2 err")
-			t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+			t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 			return
 		}
 
 		tableName := groups[1]
 		table, exist := t.tablesMap[tableName]
 		if !exist {
-			t.logAndRespond(w, http.StatusNotFound, errTableNotFound)
+			t.logAndRespond(w, http.StatusNotFound, t.config.Errors.TableNotFound)
 			return
 		}
 		recordID, _ := strconv.Atoi(groups[2])
@@ -356,10 +383,10 @@ func (t *TableHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		case http.MethodDelete:
 			t.handleRecordDelete(w, req, table, recordID)
 		default:
-			t.logAndRespond(w, http.StatusMethodNotAllowed, errNotAllowed)
+			t.logAndRespond(w, http.StatusMethodNotAllowed, t.config.Errors.NotAllowed)
 		}
 	default:
-		t.logAndRespond(w, http.StatusNotFound, errResourceNotFound)
+		t.logAndRespond(w, http.StatusNotFound, t.config.Errors.ResourceNotFound)
 	}
 }
 
@@ -402,31 +429,31 @@ func (t *TableHandler) handleTableList(w http.ResponseWriter) {
 func (t *TableHandler) handleRecordList(w http.ResponseWriter, req *http.Request, table *Table) {
 	query := req.URL.Query()
 	var err error
-	limit := defaultLimit
+	limit := t.config.Defaults.Limit
 	if limitStr := query.Get("limit"); limitStr != "" {
 		limit, err = strconv.Atoi(limitStr)
 		if err != nil {
-			limit = defaultLimit
+			limit = t.config.Defaults.Limit
 		}
 	}
-	offset := defaultOffset
+	offset := t.config.Defaults.Offset
 	if offsetStr := query.Get("offset"); offsetStr != "" {
 		offset, err = strconv.Atoi(offsetStr)
 		if err != nil {
-			offset = defaultOffset
+			offset = t.config.Defaults.Offset
 		}
 	}
 	builder := &SelectQueryBuilder{}
 	builder.Select(table.Name).Limit(limit).Offset(offset)
 	rows, err := t.db.QueryContext(req.Context(), builder.String())
 	if err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	defer closeRows(rows)
 	records, err := t.createRecordsFromRows(rows)
 	if err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	t.respond(w, http.StatusOK, ResponseRecordsBody{Records: records}, nil)
@@ -435,7 +462,7 @@ func (t *TableHandler) handleRecordList(w http.ResponseWriter, req *http.Request
 func (t *TableHandler) handleRecordCreate(w http.ResponseWriter, req *http.Request, table *Table) {
 	var record Record
 	if err := json.NewDecoder(req.Body).Decode(&record); err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	defer func() { _ = req.Body.Close() }()
@@ -461,12 +488,12 @@ func (t *TableHandler) handleRecordCreate(w http.ResponseWriter, req *http.Reque
 	}
 	result, err := t.db.ExecContext(req.Context(), builder.String(), builder.Args()...)
 	if err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	lastInsertID, err := result.LastInsertId()
 	if err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	body := map[string]int64{table.Primary().Name: lastInsertID}
@@ -478,17 +505,17 @@ func (t *TableHandler) handleRecordDetail(w http.ResponseWriter, req *http.Reque
 	builder.Select(table.Name).Where("", table.Primary().Name, recordID).Limit(1)
 	rows, err := t.db.QueryContext(req.Context(), builder.String(), builder.Args()...)
 	if err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	defer closeRows(rows)
 	records, err := t.createRecordsFromRows(rows)
 	if err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	if len(records) == 0 {
-		t.logAndRespond(w, http.StatusNotFound, errRecordNotFound)
+		t.logAndRespond(w, http.StatusNotFound, t.config.Errors.RecordNotFound)
 		return
 	}
 	t.respond(w, http.StatusOK, ResponseRecordBody{Record: records[0]}, nil)
@@ -497,7 +524,7 @@ func (t *TableHandler) handleRecordDetail(w http.ResponseWriter, req *http.Reque
 func (t *TableHandler) handleRecordUpdate(w http.ResponseWriter, req *http.Request, table *Table, recordID int) {
 	var record Record
 	if err := json.NewDecoder(req.Body).Decode(&record); err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	defer func() { _ = req.Body.Close() }()
@@ -526,12 +553,12 @@ func (t *TableHandler) handleRecordUpdate(w http.ResponseWriter, req *http.Reque
 	builder.Where("AND", table.Primary().Name, recordID)
 	result, err := t.db.ExecContext(req.Context(), builder.String(), builder.Args()...)
 	if err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	body := map[string]int64{"updated": affected}
@@ -543,12 +570,12 @@ func (t *TableHandler) handleRecordDelete(w http.ResponseWriter, req *http.Reque
 	builder.Delete(table.Name).Where("AND", table.Primary().Name, recordID)
 	result, err := t.db.ExecContext(req.Context(), builder.String(), builder.Args()...)
 	if err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		t.logAndRespond(w, http.StatusInternalServerError, errInternal)
+		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
 		return
 	}
 	body := map[string]int64{"deleted": affected}
@@ -645,41 +672,6 @@ func (t *TableHandler) logAndRespond(w http.ResponseWriter, status int, err erro
 	t.respond(w, status, nil, err)
 }
 
-func getString(rec Record, key string) (string, bool) {
-	v, ok := rec[key]
-	if !ok {
-		return "", false
-	}
-	s, ok := v.(string)
-	return s, ok
-}
-func getInt(rec Record, key string) (int, bool) {
-	v, ok := rec[key]
-	if !ok {
-		return 0, false
-	}
-	switch val := v.(type) {
-	case float64:
-		return int(val), true
-	case int:
-		return val, true
-	}
-	return 0, false
-}
-func getFloat(rec Record, key string) (float64, bool) {
-	v, ok := rec[key]
-	if !ok {
-		return 0, false
-	}
-	switch val := v.(type) {
-	case float64:
-		return val, true
-	case int:
-		return float64(val), true
-	}
-	return 0, false
-}
-
 func NewDbExplorer(db *sql.DB) (http.Handler, error) {
 	mux := http.NewServeMux()
 
@@ -709,6 +701,7 @@ func NewDbExplorer(db *sql.DB) (http.Handler, error) {
 		tablesMap:   tablesMap,
 		listRegex:   regexp.MustCompile(`^/([a-zA-Z0-9_-]+)/?$`),
 		detailRegex: regexp.MustCompile(`^/([a-zA-Z0-9_-]+)/(\d+)$`),
+		config:      NewAppConfig(),
 	})
 	return mux, nil
 }
