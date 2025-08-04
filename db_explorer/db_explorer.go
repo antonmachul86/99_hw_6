@@ -149,14 +149,9 @@ type BaseQueryBuilder struct {
 	args    []interface{}
 }
 
-func (b *BaseQueryBuilder) Where(op, column string, arg interface{}, wasWhere *bool) {
+func (b *BaseQueryBuilder) Where(column string, arg interface{}) {
 	b.builder.WriteRune(' ')
-	if !*wasWhere {
-		b.builder.WriteString("WHERE")
-		*wasWhere = true
-	} else {
-		b.builder.WriteString(op)
-	}
+	b.builder.WriteString("WHERE")
 	b.builder.WriteString(fmt.Sprintf(" `%s` = ?", column))
 	b.args = append(b.args, arg)
 }
@@ -171,15 +166,14 @@ func (b *BaseQueryBuilder) String() string {
 
 type SelectQueryBuilder struct {
 	BaseQueryBuilder
-	wasWhere bool
 }
 
 func (b *SelectQueryBuilder) Select(table string) *SelectQueryBuilder {
 	b.builder.WriteString(fmt.Sprintf("SELECT * FROM `%s`", table))
 	return b
 }
-func (b *SelectQueryBuilder) Where(op, column string, arg interface{}) *SelectQueryBuilder {
-	b.BaseQueryBuilder.Where(op, column, arg, &b.wasWhere)
+func (b *SelectQueryBuilder) Where(column string, arg interface{}) *SelectQueryBuilder {
+	b.BaseQueryBuilder.Where(column, arg)
 	return b
 }
 func (b *SelectQueryBuilder) Limit(val int) *SelectQueryBuilder {
@@ -225,8 +219,7 @@ func (b *InsertQueryBuilder) String() string {
 
 type UpdateQueryBuilder struct {
 	BaseQueryBuilder
-	wasSet   bool
-	wasWhere bool
+	wasSet bool
 }
 
 func (b *UpdateQueryBuilder) Table(tableName string) *UpdateQueryBuilder {
@@ -244,22 +237,21 @@ func (b *UpdateQueryBuilder) Set(columnName string, arg interface{}) *UpdateQuer
 	b.args = append(b.args, arg)
 	return b
 }
-func (b *UpdateQueryBuilder) Where(op, columnName string, arg interface{}) *UpdateQueryBuilder {
-	b.BaseQueryBuilder.Where(op, columnName, arg, &b.wasWhere)
+func (b *UpdateQueryBuilder) Where(columnName string, arg interface{}) *UpdateQueryBuilder {
+	b.BaseQueryBuilder.Where(columnName, arg)
 	return b
 }
 
 type DeleteQueryBuilder struct {
 	BaseQueryBuilder
-	wasWhere bool
 }
 
 func (b *DeleteQueryBuilder) Delete(tableName string) *DeleteQueryBuilder {
 	b.builder.WriteString(fmt.Sprintf("DELETE FROM `%s`", tableName))
 	return b
 }
-func (b *DeleteQueryBuilder) Where(op, columnName string, arg interface{}) *DeleteQueryBuilder {
-	b.BaseQueryBuilder.Where(op, columnName, arg, &b.wasWhere)
+func (b *DeleteQueryBuilder) Where(columnName string, arg interface{}) *DeleteQueryBuilder {
+	b.BaseQueryBuilder.Where(columnName, arg)
 	return b
 }
 
@@ -502,7 +494,7 @@ func (t *TableHandler) handleRecordCreate(w http.ResponseWriter, req *http.Reque
 
 func (t *TableHandler) handleRecordDetail(w http.ResponseWriter, req *http.Request, table *Table, recordID int) {
 	builder := &SelectQueryBuilder{}
-	builder.Select(table.Name).Where("", table.Primary().Name, recordID).Limit(1)
+	builder.Select(table.Name).Where(table.Primary().Name, recordID).Limit(1)
 	rows, err := t.db.QueryContext(req.Context(), builder.String(), builder.Args()...)
 	if err != nil {
 		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
@@ -550,7 +542,7 @@ func (t *TableHandler) handleRecordUpdate(w http.ResponseWriter, req *http.Reque
 		}
 		builder.Set(column.Name, val)
 	}
-	builder.Where("AND", table.Primary().Name, recordID)
+	builder.Where(table.Primary().Name, recordID)
 	result, err := t.db.ExecContext(req.Context(), builder.String(), builder.Args()...)
 	if err != nil {
 		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
@@ -567,7 +559,7 @@ func (t *TableHandler) handleRecordUpdate(w http.ResponseWriter, req *http.Reque
 
 func (t *TableHandler) handleRecordDelete(w http.ResponseWriter, req *http.Request, table *Table, recordID int) {
 	builder := &DeleteQueryBuilder{}
-	builder.Delete(table.Name).Where("AND", table.Primary().Name, recordID)
+	builder.Delete(table.Name).Where(table.Primary().Name, recordID)
 	result, err := t.db.ExecContext(req.Context(), builder.String(), builder.Args()...)
 	if err != nil {
 		t.logAndRespond(w, http.StatusInternalServerError, t.config.Errors.Internal)
